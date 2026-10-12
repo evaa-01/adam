@@ -1,0 +1,32 @@
+ADAM - Neon Genesis Evangelion (Nintendo 64, 1999, Japan) as a native Windows program
+==================================================================================
+
+Made with AI. It has not been reviewed by experienced developers, so expect mistakes.
+
+This package contains NO game data. You need your own ROM of the game (Japanese release, .z64, 32 MB).
+
+1. Unzip into a folder anywhere you like (one you can write to) and run adam.exe. It creates a "data" folder
+   next to itself on the first start.
+2. In the launcher, choose "Load ROM" and pick your ROM file. It is checked and copied into the "data" folder
+   next to adam.exe, so you only do this once. Saves and settings are stored there too.
+3. Choose "Start Game". The game's code is translated from your ROM when the game starts (well under a second).
+
+Controls (change them in Settings -> Controls):
+  Stick       arrow keys        / left stick
+  A, B        X, C              / A, X
+  Z           Z                 / left trigger
+  Start       Enter             / Start
+  L, R        A, S              / LB, RB
+  C buttons   I J K L           / right stick
+  D-pad       T F G H           / D-pad
+  Menu        Esc               / Back      (pauses the game)
+  Fast-forward: hold Tab / right trigger (speed in Settings -> General)
+  Debug: P pauses and resumes, F9 writes a RAM dump
+
+Graphics default to the original N64 picture at 2x resolution. Higher resolutions ("Auto" in a large window)
+currently show thin lines across some scaled backgrounds.
+
+Requirements: Windows 10/11 x64, a GPU with Direct3D 12 or Vulkan.
+
+Source code, license (GPLv3) and how to report problems: see the project's GitHub page.
+Not affiliated with or endorsed by Nintendo, Bandai Namco or the rights holders of Neon Genesis Evangelion.

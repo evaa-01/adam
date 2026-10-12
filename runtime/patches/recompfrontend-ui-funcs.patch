@@ -1,0 +1,13 @@
+diff --git a/recompui/src/api/ui_api_events.cpp b/recompui/src/api/ui_api_events.cpp
+index 8ee95c5..a2e5964 100644
+--- a/recompui/src/api/ui_api_events.cpp
++++ b/recompui/src/api/ui_api_events.cpp
+@@ -24,7 +24,7 @@
+ #include "librecomp/helpers.hpp"
+ 
+ // TODO: Forced game includes
+-#include "../../../../../patches/ui_funcs.h"
++#include "ui_funcs.h" // adam: was "../../../../../patches/ui_funcs.h" (game repo layout)
+ 
+ struct QueuedCallback {
+     recompui::ResourceId resource;

@@ -1,0 +1,19 @@
+diff --git a/recompui/src/base/ui_state.cpp b/recompui/src/base/ui_state.cpp
+index 277a421..aabf17f 100644
+--- a/recompui/src/base/ui_state.cpp
++++ b/recompui/src/base/ui_state.cpp
+@@ -787,8 +787,12 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
+                 else if (*await_stick_return && fabsf(axis_value) < 0.15f) {
+                     *await_stick_return = false;
+                     // Stop pressing the current key if the axis that was released was the one triggering key presses.
+-                    int sdl_key = cont_axis_to_key(cur_event.caxis, axis_value);
+-                    if (sdl_key == latest_controller_key_pressed) {
++                    // adam: check both of the axis' keys. The released stick's value is near 0 with either sign
++                    // (XInput pads report e.g. +0.01 after being pushed up), so its sign can name the opposite key,
++                    // which left the held key repeating forever (menus scrolled by themselves).
++                    int sdl_key_neg = cont_axis_to_key(cur_event.caxis, -1.0f);
++                    int sdl_key_pos = cont_axis_to_key(cur_event.caxis, 1.0f);
++                    if (sdl_key_neg == latest_controller_key_pressed || sdl_key_pos == latest_controller_key_pressed) {
+                         latest_controller_key_pressed = SDLK_UNKNOWN;
+                     }
+                 }

@@ -1,0 +1,22 @@
+# RSPRecomp config for the game's audio microcode (n_audio aspMain).
+# Run from the project root (N64Recomp checked out next to it): ..\N64Recomp\build\Release\RSPRecomp.exe rsp\aspMain.toml
+#
+# Found by logging the game's first audio task: ucode = 0x800CB7A0, ucode_data = 0x800F80A0 (boot section,
+# ROM = RAM - 0x80096400 + 0x1000). rspboot occupies IMEM 0x1000-0x107F and loads the microcode after it,
+# so the code runs at 0x04001080. It ends at ROM 0x37000 (last `j` to the command loop at 0x1CCC + delay slot,
+# nop padding), where a graphics microcode starts (it writes DPC_START/END): 0x37000 - 0x363A0 = 0xC60 bytes.
+text_offset = 0x363A0
+text_size = 0xC60
+text_address = 0x04001080
+rom_file_path = "../rom/game.z64"
+output_file_path = "aspMain.cpp"
+output_function_name = "aspMain"
+
+# Command jump table: the first 16 halfwords of ucode_data (ROM 0x62CA0), one IMEM address per audio
+# command. Commands 7 and 8 are 0 (unused). Command 14 is stored as 0x02B0; the RSP PC is 12 bits, so it
+# runs at 0x12B0 (a short handler at the tail of command 11's). Each target follows a `j func_40010EC`
+# (the command loop) + delay slot, i.e. the end of the previous handler.
+extra_indirect_branch_targets = [
+    0x10EC, 0x139C, 0x119C, 0x1A64, 0x11C8, 0x17EC, 0x1208,
+    0x127C, 0x1348, 0x1248, 0x1C84, 0x12D4, 0x12B0, 0x1384,
+]

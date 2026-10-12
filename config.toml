@@ -1,0 +1,52 @@
+[input]
+entrypoint = 0x80096400
+rom_file_path = "rom/game.z64"
+symbols_file_path = "symbols.toml"
+output_func_path = "RecompiledFuncs"
+single_file_output = false
+functions_per_output_file = 50
+
+[patches]
+stubs = [
+    "func_800BD3C0",  # cache
+    "func_800C5DD0",  # mfc0, mtc0
+    "func_800C635C",  # manual
+    "func_8039CA84",  # manual
+    "func_8039CBB4",  # manual
+    "func_8039D280",  # manual
+    "func_8039DF80",  # manual
+]
+renamed = [
+    "fabs",
+    "fabsf",
+]
+
+[[patches.hook]]
+func = "func_800AD814"
+before_vram = 0x800AD8A8
+text = "{ extern void yield_self(uint8_t*); yield_self(rdram); }"
+
+[[patches.hook]]
+func = "func_800B6880"
+before_vram = 0x800B6888
+text = "if (ctx->r2 != 0) { extern void yield_self(uint8_t*); yield_self(rdram); }"
+
+[[patches.hook]]
+func = "func_800A8A10"
+before_vram = 0x800A8B04
+text = "if (ctx->r2 == 0) { pause_self(rdram); }"
+
+[[patches.hook]]
+func = "func_800AB6C0"
+before_vram = 0x800AB7A0
+text = "{ extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf(\"[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\\n\", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }"
+
+[[patches.hook]]
+func = "func_800B2658"
+before_vram = 0x800B26C8
+text = "{ extern uint32_t adam_ai_status(void); extern void yield_self(uint8_t*); extern int32_t osGetThreadPri(uint8_t*, int32_t); extern void osSetThreadPri(uint8_t*, int32_t, int32_t); ctx->r2 = (gpr)(int32_t)adam_ai_status(); if (ctx->r2 != 0) { int32_t pri = osGetThreadPri(rdram, 0); osSetThreadPri(rdram, 0, 11); yield_self(rdram); osSetThreadPri(rdram, 0, pri); } }"
+
+[[patches.hook]]
+func = "func_8009B830"
+before_vram = 0x8009B830
+text = "{ extern void adam_on_sound(uint8_t*, recomp_context*); adam_on_sound(rdram, ctx); }"

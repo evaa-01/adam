@@ -1,0 +1,99 @@
+name: adam
+options:
+  basename: adam
+  target_path: ../rom/game.z64
+  base_path: .
+  platform: n64
+  compiler: GCC
+  asm_path: asm
+  asset_path: assets
+  build_path: build
+  symbol_addrs_path: symbol_addrs.txt
+  find_file_boundaries: False
+  create_undefined_funcs_auto: True
+  undefined_funcs_auto_path: undefined_funcs_auto.txt
+  create_undefined_syms_auto: True
+  undefined_syms_auto_path: undefined_syms_auto.txt
+segments:
+  - name: header
+    type: header
+    start: 0x0
+  - name: ipl3
+    type: bin
+    start: 0x40
+  - name: boot
+    type: code
+    start: 0x1000
+    vram: 0x80096400
+    subsegments:
+      - [0x1000, asm]
+      - [0x354B0, bin]
+  # Overlays from the game's overlay table at 0x800D4F50 (all load at 0x80025C00; loader func_800AB6C0).
+  # asm = text range from the table, bin = data. exclusive_ram_id keeps splat from resolving one
+  # overlay's references into another's code. ovt2 is the old "main" (.text2).
+  - name: ovt0
+    type: code
+    start: 0x69EE0
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x69EE0, asm]
+      - [0x72D80, bin]
+  - name: ovt1
+    type: code
+    start: 0x74BB0
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x74BB0, asm]
+      - [0xB8B20, bin]
+  - name: ovt2_main
+    type: code
+    start: 0xCF110
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0xCF110, asm]
+      - [0x110570, bin]
+  - name: ovt3
+    type: code
+    start: 0x113B10
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x113B10, asm]
+      - [0x1173C0, bin]
+  - name: ovt4
+    type: code
+    start: 0x117A00
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x117A00, asm]
+      - [0x1436F0, bin]
+  - name: ovt5
+    type: code
+    start: 0x14F960
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x14F960, asm]
+      - [0x168230, bin]
+  - name: ovt6
+    type: code
+    start: 0x175640
+    vram: 0x80025C00
+    exclusive_ram_id: ovt
+    subsegments:
+      - [0x175640, asm]
+      - [0x1907E0, bin]
+  - name: ovl1
+    type: code
+    start: 0x1A1880
+    vram: 0x8038F800
+    subsegments:
+      - [0x1A1880, asm]
+  - name: ovl1_after
+    type: bin
+    start: 0x1BB280
+  - [0x2000000]

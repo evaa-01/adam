@@ -1,0 +1,15 @@
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index a7954c7..cc7ff77 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -357,6 +357,10 @@ void renderer::RT64Context::send_dummy_workload(uint32_t fb_address) {
+ 
+ void renderer::RT64Context::update_screen() {
+     check_refresh_rate_changes();
++    // adam: the game is held while a menu is open in game (adam's main.cpp). Nothing changes on screen then, so RT64
++    // wouldn't present any frames and the menus (drawn in the present hook) would freeze. RT64's debugger pause
++    // re-presents the last frame every refresh instead.
++    app->state->debuggerInspector.paused = ultramodern::is_game_started() && recompui::is_any_context_shown();
+     app->updateScreen();
+ }
+ 

@@ -1,0 +1,34 @@
+# C code inserted into recompiled functions: <func> <vram> <C code>   (code goes before the instruction at vram)
+# Read by update_stubs.py -> config.toml [[patches.hook]].
+
+# Idle thread loop "while (1) { if (idle_cb) idle_cb(); }": the runtime only delivers VI/SP/DP events when the
+# running game thread yields, and this loop never does (N64Recomp only turns "b ." into pause_self). Yield at
+# the loop head so the scheduler and main thread can run.
+func_800AD814 0x800AD8A8 { extern void yield_self(uint8_t*); yield_self(rdram); }
+
+# Busy-wait "while (gfx_task_pending) {}" on the word at 0x8016D060 (cleared by the scheduler thread when the
+# RDP finishes). On hardware an interrupt preempts it; here it must yield. $v0 holds the flag at the branch.
+func_800B6880 0x800B6888 if (ctx->r2 != 0) { extern void yield_self(uint8_t*); yield_self(rdram); }
+
+# End of the main thread: "if (!flag_800D4960) for (;;);" (beq $v0,$zero,. with $v0 = 0). The flag is 0 on
+# hardware too (all RAM dumps): the main thread parks here and the game runs from the scheduler callback
+# func_800A8B34. N64Recomp only turns an unconditional "b ." into pause_self, so do it here.
+func_800A8A10 0x800A8B04 if (ctx->r2 == 0) { pause_self(rdram); }
+
+# Overlay loader func_800AB6C0(index): after the game's DMA + bzero, tell the runtime which overlay now occupies
+# the shared slot 0x80025C00 (largest overlay incl. bss ends 0x80084DD0). $s6 = ROM start, $s4 = VRAM, $s2 = ROM size.
+func_800AB6C0 0x800AB7A0 { extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf("[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\n", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }
+
+# Audio thread (Mus library) func_800B2658: "while (osAiGetStatus() & AI_STATUS_FIFO_FULL) wait;" paces the game
+# to the AI's 2-buffer FIFO (552-sample buffers at 22050 Hz -> ~40 per second). The runtime's osAiGetStatus always
+# says "not full", so the game submitted a buffer every VI (60/s = 1.5x too much audio). Report "full" while the
+# host queue already holds a buffer (adam_ai_status in runtime\src\audio.cpp), and yield so the loop can't spin.
+# At 0x800B26C8 (jal osAiGetLength) $v0 still holds the status; its delay slot copies it to $s0 for the test.
+# While waiting, drop the audio thread (priority 70) to 11: yield_self only hands the turn to HIGHER-priority
+# threads, so at 70 the wait starved the frame callback thread (50) and the task-done thread (60) for up to a VI,
+# and ~40% of frames took 3 VIs instead of 2 (choppy, ~25 fps; Project64 runs 30). 11 is still above main/idle (10).
+func_800B2658 0x800B26C8 { extern uint32_t adam_ai_status(void); extern void yield_self(uint8_t*); extern int32_t osGetThreadPri(uint8_t*, int32_t); extern void osSetThreadPri(uint8_t*, int32_t, int32_t); ctx->r2 = (gpr)(int32_t)adam_ai_status(); if (ctx->r2 != 0) { int32_t pri = osGetThreadPri(rdram, 0); osSetThreadPri(rdram, 0, 11); yield_self(rdram); osSetThreadPri(rdram, 0, pri); } }
+
+# Sound/voice playback func_8009B830(number, volume, pan, restart, priority) (-> MusStartEffect2): tell the
+# subtitle code which sound starts (runtime\src\subtitles.cpp).
+func_8009B830 0x8009B830 { extern void adam_on_sound(uint8_t*, recomp_context*); adam_on_sound(rdram, ctx); }

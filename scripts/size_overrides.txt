@@ -1,0 +1,4 @@
+# Size overrides applied after splat conversion: <name> <size>
+# Used for functions that share code with the next function (overlap is intended)
+# (Emptied when the 7 overlays from the overlay table were added: every earlier entry was a workaround for
+#  fake function splits caused by other overlays' calls into the shared 0x80025C00 slot. See git history.)

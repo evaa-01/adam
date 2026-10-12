@@ -1,0 +1,4 @@
+# Game functions whose names clash with the C library used by the generated code.
+# N64Recomp renames them to <name>_recomp (config.toml [patches] renamed).
+fabs     # libultra fabs (n64sym), clashes with <math.h> fabs
+fabsf    # libultra fabsf (n64sym), clashes with <math.h> fabsf

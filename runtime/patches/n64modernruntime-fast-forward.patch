@@ -1,0 +1,79 @@
+diff --git a/ultramodern/include/ultramodern/ultramodern.hpp b/ultramodern/include/ultramodern/ultramodern.hpp
+index 46aea61..2d368d8 100644
+--- a/ultramodern/include/ultramodern/ultramodern.hpp
++++ b/ultramodern/include/ultramodern/ultramodern.hpp
+@@ -102,6 +102,8 @@ bool is_game_thread();
+ void submit_rsp_task(RDRAM_ARG PTR(OSTask) task);
+ void send_si_message();
+ uint32_t get_speed_multiplier();
++// adam: fast-forward (VI rate only; see timer.cpp).
++void set_speed_multiplier(uint32_t multiplier);
+ 
+ // Time
+ std::chrono::high_resolution_clock::time_point get_start();
+diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 17d7a47..ca1a6d9 100644
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -193,9 +193,21 @@ void vi_thread_func() {
+ 
+     int remaining_retraces = 1;
+ 
++    // adam: fast-forward. VI times are counted from a base that moves whenever the speed multiplier changes,
++    // so a change doesn't make the VI count jump.
++    auto vi_base_time = ultramodern::get_start();
++    uint64_t vi_base_vis = 0;
++    uint32_t vi_multiplier = ultramodern::get_speed_multiplier();
++
+     while (!exited) {
++        uint32_t cur_multiplier = ultramodern::get_speed_multiplier();
++        if (cur_multiplier != vi_multiplier) {
++            vi_base_time = std::chrono::high_resolution_clock::now();
++            vi_base_vis = total_vis;
++            vi_multiplier = cur_multiplier;
++        }
+         // Determine the next VI time (more accurate than adding 16ms each VI interrupt)
+-        auto next = ultramodern::get_start() + (total_vis * 1000000us) / (60 * ultramodern::get_speed_multiplier());
++        auto next = vi_base_time + ((total_vis - vi_base_vis) * 1000000us) / (60 * vi_multiplier);
+         //if (next > std::chrono::high_resolution_clock::now()) {
+         //    printf("Sleeping for %" PRIu64 " us to get from %" PRIu64 " us to %" PRIu64 " us \n",
+         //        (next - std::chrono::high_resolution_clock::now()) / 1us,
+@@ -210,9 +222,9 @@ void vi_thread_func() {
+             next = std::chrono::high_resolution_clock::now();
+         }
+         ultramodern::sleep_until(next);
+-        auto time_now = ultramodern::time_since_start();
++        auto time_now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - vi_base_time);
+         // Calculate how many VIs have passed
+-        uint64_t new_total_vis = (time_now * (60 * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
++        uint64_t new_total_vis = vi_base_vis + (time_now * (60 * vi_multiplier) / 1000ms) + 1;
+         if (new_total_vis > total_vis + 1) {
+             //printf("Skipped % " PRId64 " frames in VI interupt thread!\n", new_total_vis - total_vis - 1);
+         }
+diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
+index ee26c45..1c3870d 100644
+--- a/ultramodern/src/timer.cpp
++++ b/ultramodern/src/timer.cpp
+@@ -1,3 +1,4 @@
++#include <atomic>
+ #include <thread>
+ #include <variant>
+ #include <set>
+@@ -145,8 +146,16 @@ void ultramodern::init_timers(RDRAM_ARG1) {
+     timer_context.thread.detach();
+ }
+ 
++// adam: fast-forward. The VI rate (and so the game's frame rate) can be raised while the game runs; the CPU
++// counter (osGetCount/osGetTime) keeps the constant speed_multiplier above.
++static std::atomic<uint32_t> vi_speed_multiplier{ speed_multiplier };
++
+ uint32_t ultramodern::get_speed_multiplier() {
+-    return speed_multiplier;
++    return vi_speed_multiplier.load();
++}
++
++void ultramodern::set_speed_multiplier(uint32_t multiplier) {
++    vi_speed_multiplier.store(multiplier < 1 ? 1 : multiplier);
+ }
+ 
+ std::chrono::high_resolution_clock::time_point ultramodern::get_start() {

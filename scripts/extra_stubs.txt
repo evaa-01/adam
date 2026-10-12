@@ -1,0 +1,6 @@
+# Manually stubbed functions (one per line, comments allowed)
+func_800C635C  # exception/thread asm, branches into func_800C5C30
+func_8039CA84  # dead code: jal into middle of func at 0x8002ADA0 (root func_8039C93C unreferenced)
+func_8039CBB4  # dead code: jal into middle of func at 0x8002AE98
+func_8039D280  # dead code: jal into middle of func at 0x8002B76C
+func_8039DF80  # dead code: jal into middle of func at 0x8002B50C

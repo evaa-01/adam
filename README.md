@@ -197,7 +197,7 @@ Higher resolutions ("Auto" in a large window) currently show thin lines across s
 - [splat](https://github.com/ethteck/splat) and [rabbitizer](https://github.com/Decompollaborate/rabbitizer) (MIT),
   [n64sym](https://github.com/shygoo/n64sym) for identifying library functions
 - Fonts: Inter and Noto Emoji (SIL Open Font License), promptfont (see `runtime\assets\promptfont\LICENSE.txt`)
-- [Project64](https://www.pj64-emu.com/), used to compare RAM dumps and saves
+- [Project64](https://www.pj64-emu.com/)
 
 ## License
 

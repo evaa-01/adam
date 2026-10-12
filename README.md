@@ -3,8 +3,7 @@
 > [!WARNING]
 > **Made with AI.** It has not been reviewed by experienced developers, so expect mistakes.
 
-A static recompilation of **Neon Genesis Evangelion** (新世紀エヴァンゲリオン) for the Nintendo 64 (Bandai, 1999,
-Japan only) into a native Windows program, built with [N64Recomp](https://github.com/N64Recomp/N64Recomp). The game's MIPS code is translated to C ahead of time and
+A static recompilation of **Neon Genesis Evangelion** (新世紀エヴァンゲリオン) for the N64 nto a native Windows program, built with [N64Recomp](https://github.com/N64Recomp/N64Recomp). The game's MIPS code is translated to C ahead of time and
 compiled for the PC; graphics are drawn by [RT64](https://github.com/rt64/rt64), and the launcher, settings menus
 and controller support come from [RecompFrontend](https://github.com/N64Recomp/RecompFrontend).
 

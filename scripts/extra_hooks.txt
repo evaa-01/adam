@@ -17,7 +17,8 @@ func_800A8A10 0x800A8B04 if (ctx->r2 == 0) { pause_self(rdram); }
 
 # Overlay loader func_800AB6C0(index): after the game's DMA + bzero, tell the runtime which overlay now occupies
 # the shared slot 0x80025C00 (largest overlay incl. bss ends 0x80084DD0). $s6 = ROM start, $s4 = VRAM, $s2 = ROM size.
-func_800AB6C0 0x800AB7A0 { extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf("[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\n", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }
+# Also clears the rewind history (runtime\src\rewind.cpp): the code mapping can't be rewound.
+func_800AB6C0 0x800AB7A0 { extern void adam_rewind_reset(void); adam_rewind_reset();extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf("[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\n", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }
 
 # Audio thread (Mus library) func_800B2658: "while (osAiGetStatus() & AI_STATUS_FIFO_FULL) wait;" paces the game
 # to the AI's 2-buffer FIFO (552-sample buffers at 22050 Hz -> ~40 per second). The runtime's osAiGetStatus always
@@ -32,3 +33,7 @@ func_800B2658 0x800B26C8 { extern uint32_t adam_ai_status(void); extern void yie
 # Sound/voice playback func_8009B830(number, volume, pan, restart, priority) (-> MusStartEffect2): tell the
 # subtitle code which sound starts (runtime\src\subtitles.cpp).
 func_8009B830 0x8009B830 { extern void adam_on_sound(uint8_t*, recomp_context*); adam_on_sound(rdram, ctx); }
+
+# Frame callback func_800A8B34 entry (the game's per-frame logic): rewind records RDRAM changes here, or puts an older
+# frame back while the rewind button is held (runtime\src\rewind.cpp).
+func_800A8B34 0x800A8B34 { extern void adam_rewind_frame(uint8_t*); adam_rewind_frame(rdram); }

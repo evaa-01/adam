@@ -1,4 +1,4 @@
-# Yay0 (Nintendo's LZ format, the game's func_80097780) for the ROM's packed assets.
+# Yay0 (an LZ format common on the N64, the game's func_80097780) for the ROM's packed assets.
 # Usage: python scripts\yay0.py list                 all Yay0 files in the ROM (offset, packed -> unpacked size)
 #        python scripts\yay0.py find <ramdump> <addr> <len>   which ROM file unpacks to contain these dump bytes
 import os, struct, sys

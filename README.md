@@ -1,9 +1,10 @@
 # adam
 
 > [!WARNING]
-> **Made with AI.** It has not been reviewed, expect mistakes.
+> **Made with AI.** It has not been reviewed by experienced developers, so expect mistakes.
 
-A static recompilation of **Neon Genesis Evangelion** (新世紀エヴァンゲリオン) into a native Windows program, built with [N64Recomp](https://github.com/N64Recomp/N64Recomp). The game's MIPS code is translated to C ahead of time and
+A static recompilation of **Neon Genesis Evangelion** (新世紀エヴァンゲリオン) for the N64 (1999,
+Japan only) into a native Windows program, built with [N64Recomp](https://github.com/N64Recomp/N64Recomp). The game's MIPS code is translated to C ahead of time and
 compiled for the PC; graphics are drawn by [RT64](https://github.com/rt64/rt64), and the launcher, settings menus
 and controller support come from [RecompFrontend](https://github.com/N64Recomp/RecompFrontend).
 
@@ -14,7 +15,7 @@ your own copy of the game; your ROM is recognised by its hash.
 
 ## Download and play
 
-1. Download the zip (`adam-<date>-<commit>.zip`) from the [Releases](../../releases) page and unzip it into a folder
+1. Download the zip (`adam-<version>.zip`) from the [Releases](../../releases) page and unzip it into a folder
    you can write to. It holds just `adam.exe`, three DLLs, `HOW_TO_PLAY.txt` and `LICENSE.txt`: the menus' fonts and
    icons are built into `adam.exe`, which unpacks them into a `data` folder next to itself on the first start.
 2. Run `adam.exe`, choose **Load ROM** and pick your ROM (Japanese release, `.z64`, 32 MB). It is checked and copied
@@ -37,8 +38,15 @@ built in).
   (the other direction is untested).
 - Launcher (Load ROM / Start Game, Controls, Settings, Exit), settings menu, remappable keyboard and gamepad input.
   Esc (or the gamepad's Back button) opens the settings in game and pauses the game.
-- Fast-forward: hold Tab or the right trigger (2x/4x/8x, set in Settings → General; sound is muted meanwhile).
-- Once your ROM is loaded, the launcher shows a picture from the game as its background (read from your ROM).
+- Fast-forward: hold Tab or the right trigger (2x, on/off in Settings → General; sound is muted meanwhile).
+- Rewind: hold Backspace or click the left stick during a mission to run the game backwards (up to 10 s; on/off in
+  Settings → General).
+- Bezels: artwork from the game in the black bars beside the 4:3 picture (Settings → Bezels: picture, brightness,
+  black & white, position and size). The launcher's background is chosen the same way (Background in the launcher).
+  All pictures are read from your ROM.
+- Widescreen (a wide aspect ratio in Settings → Graphics) is used only in mission battles; everything else stays 4:3.
+- Reset Game in Settings → General restarts the game.
+- What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 - Later parts of the game have not been played through yet. Some overlays (code the game loads on demand) have
   never run; expect problems there. Reports are welcome.
 
@@ -138,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package_live.ps1
 ```
 
 The first command builds `runtime\build-live\adam.exe`; the second copies it with its DLLs, `HOW_TO_PLAY.txt`
-and the license into `packages\adam-<date>-<commit>\` plus a zip (no folders: `symbols.toml`, `config.toml` and
+and the license into `packages\adam-<version>\` (version from `runtime\package\VERSION`) plus a zip (no folders: `symbols.toml`, `config.toml` and
 `runtime\assets\` are built into the exe), and refuses to include ROMs, saves or debug files.
 `runtime\build-live\adam.exe --live-test <rom.z64>` recompiles everything in the console and reports problems.
 
@@ -157,6 +165,7 @@ Default controls (change them in Settings → Controls):
 | D-pad | T F G H | D-pad |
 | Menu | Esc | Back |
 | Fast-forward (hold) | Tab | right trigger |
+| Rewind (hold, in missions) | Backspace | left stick click |
 
 Debug keys in game: **P** pauses and resumes, **F9** writes a 4 MB RAM dump (big-endian, comparable with
 Project64's) to `dumps\inbox\` if that folder exists, otherwise next to the exe.
@@ -175,8 +184,12 @@ Higher resolutions ("Auto" in a large window) currently show thin lines across s
 | `rsp\aspMain.toml` | RSPRecomp settings for the audio microcode |
 | `runtime\src\` | the PC program: game registration, overlays, audio, input, settings |
 | `runtime\src\live.cpp`, `rsp_interp.cpp` | the live build: recompiles the game code from the ROM at startup; audio microcode interpreter |
-| `runtime\src\launcher_art.cpp` | decodes the launcher background from the stored ROM |
-| `runtime\patches\` | fixes to RT64 (S2DEX2 2D graphics), RecompFrontend and N64ModernRuntime (fast-forward) |
+| `runtime\src\launcher_art.cpp` | decodes the game's pictures from the stored ROM |
+| `runtime\src\bezels.cpp`, `bezel_layout.h` | bezels and launcher background (picker tabs, layout math) |
+| `runtime\src\rewind.cpp` | rewind (RAM history, what is kept live) |
+| `runtime\patches\` | fixes to RT64 (S2DEX2 2D graphics), RecompFrontend (menus) and N64ModernRuntime / N64Recomp (fast-forward, rewind, live build) |
+| `runtime\package\` | `HOW_TO_PLAY.txt` and `VERSION` for the download (`scripts\package_live.ps1`) |
+| `CHANGELOG.md` | what changed in each version |
 | `runtime\assets\` | fonts and icons for the menus (built into `adam.exe`, unpacked into `data\` at startup) |
 | `runtime\src\embedded_files_unpack.cpp` | unpacks the files built into the exe (list generated by `runtime\CMakeLists.txt`) |
 
@@ -197,7 +210,7 @@ Higher resolutions ("Auto" in a large window) currently show thin lines across s
 - [splat](https://github.com/ethteck/splat) and [rabbitizer](https://github.com/Decompollaborate/rabbitizer) (MIT),
   [n64sym](https://github.com/shygoo/n64sym) for identifying library functions
 - Fonts: Inter and Noto Emoji (SIL Open Font License), promptfont (see `runtime\assets\promptfont\LICENSE.txt`)
-- [Project64](https://www.pj64-emu.com/)
+- [Project64](https://www.pj64-emu.com/), used to compare RAM dumps and saves
 
 ## License
 
@@ -208,7 +221,7 @@ RecompFrontend currently has no license file. adam uses it the same way other N6
 or any other rights holder object to how it or anything else is used here, please open an issue and it will be
 changed or taken down.
 
-This project is not affiliated with or endorsed by Nintendo, Bandai Namco, or the rights holders of Neon Genesis
-Evangelion. "Nintendo 64" and "Neon Genesis Evangelion" are trademarks of their respective owners and are used here
+This project is not affiliated with or endorsed by the game's publisher, the console maker, or the rights holders of Neon Genesis
+Evangelion. "Neon Genesis Evangelion" is a trademark of its respective owners and is used here
 only to identify the game this project works with. It contains no copyrighted game data: no ROM, no game code, no
 graphics, sound or text from the game.

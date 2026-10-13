@@ -1,8 +1,9 @@
 # Asks the local LM Studio vision model about an image and prints its text answer. The image only goes to
 # LM Studio on this PC (http://127.0.0.1:1234), so screenshots stay local; whoever runs this sees text only.
-# Usage: python scripts\ask_image.py <image.png> "<question>" [model]   (default model: google/gemma-4-e4b)
+# Usage: python scripts\ask_image.py <image.png> "<question>" [model]   (default model: qwen/qwen3-vl-8b)
 # Local vision models miss fine details (1-pixel lines, small rendering bugs): ask concrete yes/no questions
-# and have a person confirm anything important.
+# and have a person confirm anything important. Never use it for positions (scripts\ocr.ps1 gives exact ones) or small
+# icons; scores per question type: scripts\vision_bench.py.
 import base64, json, sys, urllib.request
 
 URL = "http://127.0.0.1:1234/v1/chat/completions"
@@ -11,7 +12,7 @@ def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__ or "usage: ask_image.py <image.png> <question> [model]")
     path, question = sys.argv[1], sys.argv[2]
-    model = sys.argv[3] if len(sys.argv) > 3 else "google/gemma-4-e4b"
+    model = sys.argv[3] if len(sys.argv) > 3 else "qwen/qwen3-vl-8b"
     image = base64.b64encode(open(path, "rb").read()).decode("ascii")
     body = {
         "model": model,

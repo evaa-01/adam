@@ -39,7 +39,7 @@ text = "if (ctx->r2 == 0) { pause_self(rdram); }"
 [[patches.hook]]
 func = "func_800AB6C0"
 before_vram = 0x800AB7A0
-text = "{ extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf(\"[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\\n\", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }"
+text = "{ extern void adam_rewind_reset(void); adam_rewind_reset();extern void unload_overlays(int32_t, uint32_t); extern void load_overlays(uint32_t, int32_t, uint32_t); unload_overlays((int32_t)0x80025C00, 0x5F1D0); load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18); { extern int printf(const char*, ...); printf(\"[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\\n\", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20); } }"
 
 [[patches.hook]]
 func = "func_800B2658"
@@ -50,3 +50,8 @@ text = "{ extern uint32_t adam_ai_status(void); extern void yield_self(uint8_t*)
 func = "func_8009B830"
 before_vram = 0x8009B830
 text = "{ extern void adam_on_sound(uint8_t*, recomp_context*); adam_on_sound(rdram, ctx); }"
+
+[[patches.hook]]
+func = "func_800A8B34"
+before_vram = 0x800A8B34
+text = "{ extern void adam_rewind_frame(uint8_t*); adam_rewind_frame(rdram); }"

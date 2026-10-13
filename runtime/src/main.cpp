@@ -31,6 +31,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <timeapi.h>
+#include <DbgHelp.h>
+#include <TlHelp32.h>
+#include <thread>
+#pragma comment(lib, "dbghelp.lib")
 
 #include "nfd.h"
 
@@ -45,10 +49,12 @@
 
 #include "recompui/recompui.h"
 #include "recompui/program_config.h"
+#include "recompui/config.h"
 #include "recompui/renderer.h"
 #include "recompinput/recompinput.h"
 #include "recompinput/input_events.h"
 #include "recompinput/input_state.h"
+#include "recompinput/profiles.h"
 #include "elements/ui_image.h"
 
 #include "launcher_art.h"
@@ -66,11 +72,29 @@ namespace adam::audio {
 namespace adam::input {
     void init();
     ultramodern::input::callbacks_t callbacks();
+    void apply_rumble(bool game_held);
 }
 
 namespace adam {
     void init_config();
-    uint32_t get_fast_forward_speed();
+    bool get_fast_forward_enabled();
+    bool get_rewind_enabled();
+}
+
+// rewind.cpp: hold a button to run the game backwards.
+// bezels.cpp: artwork in the black bars beside the 4:3 picture.
+namespace adam::bezels {
+    void update();
+    void update_launcher(recompui::Element* container);
+    void open_launcher_background_settings();
+}
+
+namespace adam::rewind {
+    void init();
+    void set_held(bool held);
+    void set_enabled(bool enabled);
+    bool available();
+    bool in_gameplay();
 }
 
 // rsp_interp.cpp: RSP interpreter (live shell audio) and its comparison test against the recompiled aspMain.
@@ -84,6 +108,7 @@ namespace adam::live {
     void on_init(uint8_t* rdram, recomp_context* ctx);
     void entrypoint(uint8_t* rdram, recomp_context* ctx);
     int test(const char* rom_path);
+    bool find_function(const void* addr, uint32_t* vram, uint32_t* offset);
 }
 static gpr get_entrypoint_address() { return (gpr)(int32_t)0x80096400u; }
 #else
@@ -205,19 +230,30 @@ void adam_debug_wait_while_paused() {
     frame_count++;
     // (While a menu holds the game, RecompFrontend's renderer keeps re-presenting the last frame, so the menu keeps
     // working: runtime\patches\recompfrontend-menu-pause.patch.)
-    while (paused.load() || recompui::is_any_context_shown()) {
+    while (paused.load() || recompui::is_context_capturing_input()) {
         Sleep(5);
     }
 }
 
+// Fast-forward: a framebuffer swap is applied at a VI only once the graphics tasks in flight when the game asked for it
+// are done (runtime\patches\n64modernruntime-vi-swap-gate.patch). Without this, at 4x the battle's HUD flickered and
+// frames showed black. The count is the game's pending counter 0x8016D060 (+1 when func_800B666C submits a task, -1
+// when the task-done thread sees it finish). Waiting for it to reach 0 instead froze the game at 8x: by then the next
+// frame's tasks were already queued, and the game only runs them after the swap.
+static uint32_t gfx_tasks_in_flight() {
+    int32_t pending = dump_rdram == nullptr ? 0 : *(const int32_t*)(dump_rdram + 0x16D060);
+    return pending > 0 ? (uint32_t)pending : 0;
+}
+
 static std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
     dump_rdram = rdram;
+    ultramodern::set_swap_gate(gfx_tasks_in_flight);
     // SkipBuffering is RT64's default, which the 30 fps pacing (tag pacing-30fps) was measured with.
     return recompui::renderer::create_render_context(rdram, window_handle, ultramodern::renderer::PresentationMode::SkipBuffering, developer_mode);
 }
 
 static bool debug_keys_active() {
-    return ultramodern::is_game_started() && !recompui::is_any_context_shown() && GetForegroundWindow() == main_window;
+    return ultramodern::is_game_started() && !recompui::is_context_capturing_input() && GetForegroundWindow() == main_window;
 }
 
 // Game time in seconds: since the first call, not counting time spent paused.
@@ -280,7 +316,11 @@ static void check_ram_dump_key() {
         char exe_path[MAX_PATH];
         GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
         std::filesystem::path dir = std::filesystem::path{ exe_path }.parent_path();
-        if (std::filesystem::is_directory(dir / ".." / ".." / "dumps")) {
+        // ADAM_DUMP_DIR=<folder> overrides the folder (test dumps that don't belong in the project's dumps\).
+        if (const char* env_dir = std::getenv("ADAM_DUMP_DIR"); env_dir != nullptr && env_dir[0] != '\0') {
+            dir = env_dir;
+            std::filesystem::create_directories(dir);
+        } else if (std::filesystem::is_directory(dir / ".." / ".." / "dumps")) {
             dir = dir / ".." / ".." / "dumps" / "inbox";
             std::filesystem::create_directories(dir);
         }
@@ -334,34 +374,162 @@ static ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callba
     return ultramodern::renderer::WindowHandle{ wm_info.info.win.window, GetCurrentThreadId() };
 }
 
-// Fast-forward: while the right trigger (any gamepad) or Tab is held in game, the VI rate - and so the game - runs at
-// the General tab's speed (runtime\patches\n64modernruntime-fast-forward.patch makes the rate adjustable; audio.cpp
-// mutes meanwhile). Not while paused or while a menu is open.
-static void check_fast_forward() {
-    bool held = false;
-    if (ultramodern::is_game_started() && !paused.load() && !recompui::is_any_context_shown()) {
-        held = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0 && GetForegroundWindow() == main_window;
-        for (int i = 0; i < SDL_NumJoysticks() && !held; i++) {
-            SDL_GameController* controller = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
-            if (controller != nullptr && SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000) {
-                held = true;
+// Fast-forward: while the Fast-Forward button is held in game, the VI rate - and so the game - runs at 2x if it's switched
+// on in the General tab (runtime\patches\n64modernruntime-fast-forward.patch makes the rate adjustable; audio.cpp mutes
+// meanwhile). Not while paused or while a menu is open.
+// Rewind (rewind.cpp): while the Rewind button is held in a mission, if it's switched on in the General tab. Wins over
+// fast-forward.
+// Both buttons are remappable in the Controls tab (runtime\patches\recompfrontend-feature-inputs.patch; defaults in
+// config.cpp: Tab / right trigger, Backspace / left stick click; any gamepad).
+static bool rewind_held = false;
+
+static bool feature_input_held(recompinput::GameInput input) {
+    for (int profile : { recompinput::profiles::get_sp_keyboard_profile_index(), recompinput::profiles::get_sp_controller_profile_index() }) {
+        if (profile < 0) {
+            continue;
+        }
+        for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+            if (recompinput::get_input_digital(0, recompinput::profiles::get_input_binding(profile, input, i))) {
+                return true;
             }
         }
     }
-    uint32_t speed = held ? adam::get_fast_forward_speed() : 1;
+    return false;
+}
+
+static void check_rewind() {
+    bool held = false;
+    bool enabled = adam::get_rewind_enabled();
+    adam::rewind::set_enabled(enabled);
+    if (enabled && adam::rewind::available() && ultramodern::is_game_started() && !paused.load() && !recompui::is_context_capturing_input()) {
+        held = feature_input_held(recompinput::GameInput::REWIND);
+    }
+    rewind_held = held;
+    adam::rewind::set_held(held);
+}
+
+static void check_fast_forward() {
+    bool held = false;
+    if (adam::get_fast_forward_enabled() && ultramodern::is_game_started() && !paused.load() && !recompui::is_context_capturing_input() &&
+        !rewind_held) {
+        held = feature_input_held(recompinput::GameInput::FAST_FORWARD);
+    }
+    uint32_t speed = held ? 2 : 1;
     if (speed != ultramodern::get_speed_multiplier()) {
         ultramodern::set_speed_multiplier(speed);
         printf("[fast-forward] %ux at %.2f s\n", speed, game_seconds());
     }
 }
 
+// Every VI (VI thread): the gamepad motor follows the game, but stops while the game is held (P or a menu) or rewinding.
+static void update_rumble() {
+    adam::input::apply_rumble(paused.load() || recompui::is_context_capturing_input());
+    recompinput::update_rumble();
+}
+
+// Test runs (scripts\run_game.ps1 sets it): with ADAM_STATE_FILE=<path>, the current state is written there as one JSON line
+// five times a second, so tests can check what the game is doing instead of guessing it from screenshots.
+// game_mode = u16 0x800D5114 (rewind.cpp lists known values; 0x2D/0x30 = mission battles), logic_running = u8 0x80149FC4
+// (0 while the game's own pause screen is up), menu = a RecompFrontend menu is open, paused = P, aspect = the aspect ratio
+// the renderer uses (0 Original, 1 Expand, 2 Manual; see check_aspect_ratio).
+static void write_state_file() {
+    static const char* path = std::getenv("ADAM_STATE_FILE");
+    static ULONGLONG last = 0;
+    if (path == nullptr || path[0] == '\0' || GetTickCount64() - last < 200) {
+        return;
+    }
+    last = GetTickCount64();
+    bool started = ultramodern::is_game_started() && dump_rdram != nullptr;
+    char line[384];
+    snprintf(line, sizeof(line),
+        "{\"time\": %.2f, \"frame\": %u, \"game_started\": %s, \"game_mode\": %d, \"logic_running\": %d, \"menu\": %s, "
+        "\"paused\": %s, \"speed\": %u, \"rewinding\": %s, \"aspect\": %d}\n",
+        game_seconds(), frame_count.load(), started ? "true" : "false",
+        started ? *(const uint16_t*)(dump_rdram + (0x0D5114 ^ 2)) : -1, started ? dump_rdram[0x149FC4 ^ 3] : -1,
+        recompui::is_context_capturing_input() ? "true" : "false", paused.load() ? "true" : "false",
+        ultramodern::get_speed_multiplier(), rewind_held ? "true" : "false",
+        (int)ultramodern::renderer::get_graphics_config().ar_option);
+    // Written to a temporary file and renamed, so a reader never sees half a line.
+    std::filesystem::path target{ path };
+    std::filesystem::path tmp = target;
+    tmp += ".tmp";
+    {
+        std::ofstream out{ tmp, std::ios::trunc };
+        out << line;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, target, ec);
+}
+
+// Widescreen only in gameplay (user, 2026-10-12): the Graphics tab's aspect ratio (e.g. Expand) is applied while a mission's
+// battle code runs (rewind.cpp in_gameplay: the mode's overlay is 1); everywhere else - intro, menus, cutscenes, briefings,
+// the launcher - the renderer gets Original, since those scenes are drawn for 4:3 (2D backgrounds and sprites don't fill a
+// wider screen). The saved setting is never changed: only the copy the renderer uses (ultramodern's graphics config, which
+// the Graphics tab rebuilds from the saved values whenever it applies a change - then this corrects it again).
+static void check_aspect_ratio() {
+    using ultramodern::renderer::AspectRatio;
+    static bool ready = false;
+    if (!ready) {
+        // The Graphics tab exists once the menus are set up (it throws before that).
+        try {
+            recompui::config::get_graphics_config();
+            ready = true;
+        } catch (...) {
+            return;
+        }
+    }
+    auto chosen = static_cast<AspectRatio>(std::get<uint32_t>(
+        recompui::config::get_graphics_config().get_option_value(recompui::config::graphics::options::ar_option)));
+    bool gameplay = ultramodern::is_game_started() && adam::rewind::in_gameplay();
+    AspectRatio wanted = gameplay ? chosen : AspectRatio::Original;
+    ultramodern::renderer::GraphicsConfig config = ultramodern::renderer::get_graphics_config();
+    if (config.ar_option != wanted) {
+        config.ar_option = wanted;
+        ultramodern::renderer::set_graphics_config(config);
+        printf("[aspect] %s at %.2f s\n", wanted == AspectRatio::Original ? "Original" : wanted == AspectRatio::Expand ? "Expand" : "Manual",
+            game_seconds());
+    }
+}
+
+// Reset Game (config.cpp "Game" tab): the runtime can't restart the recompiled game in place, so quit cleanly (the save
+// thread writes the save, as on Exit) and start adam.exe again with --game adam after recomp::start returns (main).
+static std::atomic<bool> restart_requested = false;
+
+namespace adam {
+    void request_reset() {
+        printf("[reset] restarting the game at %.2f s\n", game_seconds());
+        restart_requested = true;
+        ultramodern::quit();
+    }
+}
+
+static void restart_self() {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::filesystem::path exe_path{ exe };
+    std::wstring command = L"\"" + exe_path.wstring() + L"\" --game adam";
+    std::wstring dir = exe_path.parent_path().wstring();
+    STARTUPINFOW startup{ sizeof(startup) };
+    PROCESS_INFORMATION process{};
+    if (CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr, dir.c_str(), &startup, &process)) {
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+    } else {
+        fprintf(stderr, "[reset] could not start %ls (error %lu)\n", exe, GetLastError());
+    }
+}
+
 // Called by recomp::start on the main thread every millisecond.
 static void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
+    check_rewind();
     check_fast_forward();
     check_pause_key();
     check_ram_dump_key();
     update_title();
+    write_state_file();
+    check_aspect_ratio();
+    adam::bezels::update();
 }
 
 // --- Launcher -----------------------------------------------------------------------------------
@@ -388,50 +556,23 @@ std::vector<recomp::GameEntry> supported_games = {
     },
 };
 
-// Background: a picture from the game, decoded from the stored ROM (src\launcher_art.cpp). Without a stored ROM the
-// launcher keeps RecompFrontend's default look until Load ROM stores one (on_launcher_update adds it then).
-static bool launcher_background_tried = false;
-
-static void add_launcher_background(recompui::LauncherMenu* menu) {
-    // librecomp only rechecks stored ROMs at startup (is_rom_valid stays false after Load ROM): wait for the file.
-    std::error_code ec;
-    if (!std::filesystem::exists(recomp::get_config_path() / "adam.z64", ec)) {
-        return;
-    }
-    launcher_background_tried = true;
-    std::vector<char> rgba;
-    uint32_t width, height;
-    if (!adam::launcher_art::load_background(rgba, width, height)) {
-        return;
-    }
-    recompui::queue_image_from_bytes_rgba32("adam_launcher_background", rgba, width, height);
-    recompui::ContextId context = recompui::get_current_context();
-    // Scaled to the window's width and centered vertically (like set_launcher_background_svg): fills the window and
-    // crops top and bottom in a wide window.
-    recompui::Element* image = context.create_element<recompui::Image>(menu->get_background_container(), "adam_launcher_background");
-    image->set_position(recompui::Position::Absolute);
-    image->set_top(50.0f, recompui::Unit::Percent);
-    image->set_left(0);
-    image->set_width(100.0f, recompui::Unit::Percent);
-    image->set_height_auto();
-    image->set_translate_2D(0.0f, -50.0f, recompui::Unit::Percent);
-}
-
+// Background: a picture from the game, chosen in the "Background" entry / settings tab (src\bezels.cpp: the same picker and
+// adjustments as the bezels; data\launcher_background.json; default D02END20). The pictures are decoded from the stored ROM
+// (src\launcher_art.cpp); without a stored ROM the launcher keeps RecompFrontend's default look until Load ROM stores one.
 static void on_launcher_init(recompui::LauncherMenu* menu) {
-    add_launcher_background(menu);
+    adam::bezels::update_launcher(menu->get_background_container());
     recompui::GameOptionsMenu* options = menu->init_game_options_menu(game_id, mod_game_id, "ADAM", {});
     recompui::update_game_mod_id(mod_game_id);
     options->add_start_game_or_load_rom_option();
     options->add_setup_controls_option();
     options->add_settings_option();
+    options->add_option("Background", []() { adam::bezels::open_launcher_background_settings(); });
     options->add_exit_option();
 }
 
-// Every frame while the launcher shows: after the first Load ROM, add the background right away.
+// Every frame while the launcher shows: applies background changes (and shows it right after the first Load ROM).
 static void on_launcher_update(recompui::LauncherMenu* menu) {
-    if (!launcher_background_tried) {
-        add_launcher_background(menu);
-    }
+    adam::bezels::update_launcher(menu->get_background_container());
 }
 
 // --- Command line -------------------------------------------------------------------------------
@@ -464,10 +605,152 @@ static const char* rom_error_name(recomp::RomValidationError err) {
     }
 }
 
+// On a crash: print where it happened and write crash.dmp (all threads' stacks; open with
+// `lldb adam.exe -c crash.dmp` -> `thread backtrace all`) into the working directory (data\).
+static LONG WINAPI on_crash(EXCEPTION_POINTERS* info) {
+    void* addr = info->ExceptionRecord->ExceptionAddress;
+    HMODULE module = nullptr;
+    char name[MAX_PATH] = "(no module: JIT code?)";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)addr, &module)) {
+        GetModuleFileNameA(module, name, sizeof(name));
+    }
+    fprintf(stderr, "[crash] exception 0x%08lX at %p (%s +0x%llX), thread %lu\n", info->ExceptionRecord->ExceptionCode, addr,
+        name, module ? (unsigned long long)((uintptr_t)addr - (uintptr_t)module) : 0ull, GetCurrentThreadId());
+    if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        fprintf(stderr, "[crash] %s address 0x%llX\n", info->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading",
+            (unsigned long long)info->ExceptionRecord->ExceptionInformation[1]);
+    }
+#ifdef ADAM_LIVE
+    uint32_t vram, offset;
+    if (module == nullptr && adam::live::find_function(addr, &vram, &offset)) {
+        fprintf(stderr, "[crash] in compiled game function 0x%08X + 0x%X; code bytes from -0x40:\n[crash]", vram, offset);
+        for (int i = -0x40; i < 0x20; i++) {
+            fprintf(stderr, " %02X", ((const uint8_t*)addr)[i]);
+        }
+        fprintf(stderr, "\n");
+    }
+#endif
+    HANDLE file = CreateFileA("crash.dmp", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION exception{ GetCurrentThreadId(), info, FALSE };
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpWithThreadInfo, &exception, nullptr, nullptr);
+        CloseHandle(file);
+        fprintf(stderr, "[crash] wrote crash.dmp\n");
+    }
+    // Game memory too (8 MB, big-endian like F9's dumps): the minidump doesn't contain it.
+    if (dump_rdram != nullptr) {
+        FILE* f = fopen("crash_rdram.bin", "wb");
+        if (f != nullptr) {
+            for (uint32_t i = 0; i < 8 * 1024 * 1024; i++) {
+                fputc(dump_rdram[i ^ 3], f);
+            }
+            fclose(f);
+            fprintf(stderr, "[crash] wrote crash_rdram.bin\n");
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+#ifdef ADAM_LIVE
+// Debug (ADAM_WATCHDOG=1, live build): when the frame callback hasn't started for 5 s while the game runs (no pause, no
+// menu), print each thread's game functions: return addresses on its native stack that are inside compiled game code
+// (nearest function start; JIT frames have no unwind info, so this is a scan, not an exact backtrace).
+extern "C" std::atomic<uint64_t> adam_frame_hook_calls; // rewind.cpp
+static void print_game_stacks() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    THREADENTRY32 te{ sizeof(te) };
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != GetCurrentProcessId() || te.th32ThreadID == GetCurrentThreadId()) {
+            continue;
+        }
+        HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, te.th32ThreadID);
+        if (thread == nullptr) {
+            continue;
+        }
+        SuspendThread(thread);
+        CONTEXT ctx{};
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        std::vector<uint32_t> funcs;
+        std::vector<uintptr_t> natives; // offsets into adam.exe (resolve with llvm-symbolizer --obj=adam.exe)
+        static const uintptr_t exe_base = (uintptr_t)GetModuleHandleA(nullptr);
+        static const uintptr_t exe_end = exe_base + ((IMAGE_NT_HEADERS*)(exe_base + ((IMAGE_DOS_HEADER*)exe_base)->e_lfanew))->OptionalHeader.SizeOfImage;
+        if (GetThreadContext(thread, &ctx)) {
+            if (ctx.Rip >= exe_base && ctx.Rip < exe_end) {
+                natives.push_back(ctx.Rip - exe_base);
+            }
+            {
+                MEMORY_BASIC_INFORMATION m{};
+                VirtualQuery((void*)ctx.Rsp, &m, sizeof(m));
+                uintptr_t e = (uintptr_t)m.BaseAddress + m.RegionSize;
+                for (uintptr_t p = ctx.Rsp; p + 8 <= e && natives.size() < 16; p += 8) {
+                    uintptr_t v = *(uintptr_t*)p;
+                    if (v >= exe_base && v < exe_end) {
+                        natives.push_back(v - exe_base);
+                    }
+                }
+            }
+            uint32_t vram, offset;
+            if (adam::live::find_function((void*)ctx.Rip, &vram, &offset)) {
+                funcs.push_back(vram);
+            }
+            MEMORY_BASIC_INFORMATION mbi{};
+            VirtualQuery((void*)ctx.Rsp, &mbi, sizeof(mbi));
+            uintptr_t end = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+            for (uintptr_t p = ctx.Rsp; p + 8 <= end && funcs.size() < 24; p += 8) {
+                if (adam::live::find_function(*(void**)p, &vram, &offset) && offset != 0 && (funcs.empty() || funcs.back() != vram)) {
+                    funcs.push_back(vram);
+                }
+            }
+        }
+        ResumeThread(thread);
+        CloseHandle(thread);
+        if (!funcs.empty()) {
+            printf("[watchdog] thread %lu:", te.th32ThreadID);
+            for (uint32_t f : funcs) {
+                printf(" %08X", f);
+            }
+            printf("\n[watchdog]   native:");
+            for (uintptr_t n : natives) {
+                printf(" 0x%llX", (unsigned long long)n);
+            }
+            printf("\n");
+        }
+    }
+    CloseHandle(snap);
+}
+
+static void start_watchdog() {
+    const char* env = std::getenv("ADAM_WATCHDOG");
+    if (env == nullptr || env[0] != '1') {
+        return;
+    }
+    std::thread([] {
+        uint64_t last = 0;
+        int quiet = 0;
+        while (true) {
+            Sleep(1000);
+            uint64_t calls = adam_frame_hook_calls.load();
+            bool running = ultramodern::is_game_started() && !paused.load() && !recompui::is_context_capturing_input();
+            quiet = (calls == last && running && calls != 0) ? quiet + 1 : 0;
+            last = calls;
+            if (quiet == 5 || quiet == 20) {
+                printf("[watchdog] no frame callback for %d s (game time %.2f s)\n", quiet, game_seconds());
+                print_game_stacks();
+            }
+        }
+    }).detach();
+}
+#endif
+
 int main(int argc, char** argv) {
     // Unbuffered output, so logs survive when the process is killed while redirected to a file.
     setvbuf(stdout, nullptr, _IONBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
+    SetUnhandledExceptionFilter(on_crash);
+#ifdef ADAM_LIVE
+    start_watchdog();
+#endif
 
     // ROM paths are made absolute before switching to the exe's folder below.
     std::string rom_path_abs;
@@ -521,6 +804,7 @@ int main(int argc, char** argv) {
     recompui::programconfig::set_program_id(game_id);
 
     adam::audio::init(48000);
+    adam::rewind::init();
 
     const adam::EmbeddedFile* controller_db = adam::find_embedded_file("recompcontrollerdb.txt");
     if (SDL_GameControllerAddMappingsFromRW(SDL_RWFromConstMem(controller_db->data, (int)controller_db->size), 1) < 0) {
@@ -562,18 +846,22 @@ int main(int argc, char** argv) {
     // librecomp's CLI parser handles "--game adam" (start right away, skipping the launcher).
     cfg.argc = argc;
     cfg.argv = argv;
-    cfg.project_version = recomp::Version{ 0, 1, 0 };
+    // From runtime\package\VERSION (CMakeLists.txt).
+    cfg.project_version = recomp::Version{ ADAM_VERSION_MAJOR, ADAM_VERSION_MINOR, ADAM_VERSION_PATCH };
     cfg.rsp_callbacks = recomp::rsp::callbacks_t{ .get_rsp_microcode = get_rsp_microcode };
     cfg.audio_callbacks = adam::audio::callbacks();
     cfg.input_callbacks = adam::input::callbacks();
     cfg.renderer_callbacks = ultramodern::renderer::callbacks_t{ .create_render_context = create_render_context };
     cfg.gfx_callbacks = ultramodern::gfx_callbacks_t{ .create_gfx = create_gfx, .create_window = create_window, .update_gfx = update_gfx };
-    cfg.events_callbacks = ultramodern::events::callbacks_t{ .vi_callback = recompinput::update_rumble };
+    cfg.events_callbacks = ultramodern::events::callbacks_t{ .vi_callback = update_rumble };
     cfg.error_handling_callbacks = ultramodern::error_handling::callbacks_t{ .message_box = recompui::message_box };
 
     recomp::start(cfg);
 
     NFD_Quit();
     timeEndPeriod(1);
+    if (restart_requested.load()) {
+        restart_self();
+    }
     return EXIT_SUCCESS;
 }

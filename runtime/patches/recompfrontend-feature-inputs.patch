@@ -1,0 +1,22 @@
+diff --git a/recompinput/include/recompinput/input_types.h b/recompinput/include/recompinput/input_types.h
+index f5ed6c0..98abb4c 100644
+--- a/recompinput/include/recompinput/input_types.h
++++ b/recompinput/include/recompinput/input_types.h
+@@ -37,10 +37,16 @@ namespace recompinput {
+         DEFINE_INPUT(TAB_LEFT_MENU, 0, "Tab Left (Menu)") \
+         DEFINE_INPUT(TAB_RIGHT_MENU, 0, "Tab Right (Menu)")
+ 
++    // adam: hold-to-use features of the recomp (main.cpp), remappable in the Controls tab like the N64 buttons.
++    #define DEFINE_RECOMP_FEATURE_INPUTS() \
++        DEFINE_INPUT(FAST_FORWARD, 0, "Fast-Forward") \
++        DEFINE_INPUT(REWIND, 0, "Rewind")
++
+     #define DEFINE_ALL_INPUTS() \
+         DEFINE_N64_AXIS_INPUTS() \
+         DEFINE_N64_BUTTON_INPUTS() \
+-        DEFINE_RECOMP_UI_INPUTS()
++        DEFINE_RECOMP_UI_INPUTS() \
++        DEFINE_RECOMP_FEATURE_INPUTS()
+ 
+     #define DEFINE_INPUT(name, value, readable) name,
+     // - Enum containing every recomp input.

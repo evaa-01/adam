@@ -1,5 +1,6 @@
-ADAM - Neon Genesis Evangelion (Nintendo 64, 1999, Japan) as a native Windows program
+ADAM - Neon Genesis Evangelion (N64, 1999, Japan) as a native Windows program
 ==================================================================================
+Version {VERSION}
 
 Made with AI. It has not been reviewed by experienced developers, so expect mistakes.
 
@@ -20,8 +21,15 @@ Controls (change them in Settings -> Controls):
   C buttons   I J K L           / right stick
   D-pad       T F G H           / D-pad
   Menu        Esc               / Back      (pauses the game)
-  Fast-forward: hold Tab / right trigger (speed in Settings -> General)
+  Fast-forward  hold Tab / right trigger (2x speed; on/off in Settings -> General)
+  Rewind        hold Backspace / click the left stick, in missions (up to 10 s; on/off in Settings -> General)
   Debug: P pauses and resumes, F9 writes a RAM dump
+
+Extras:
+  Settings -> Bezels: artwork from the game in the black bars beside the picture (pick a picture, brightness,
+    black & white, position and size).
+  Launcher -> Background: the same choices for the launcher's background.
+  Settings -> General -> Reset Game: restarts the game (like the console's reset).
 
 Graphics default to the original N64 picture at 2x resolution. Higher resolutions ("Auto" in a large window)
 currently show thin lines across some scaled backgrounds.
@@ -29,4 +37,4 @@ currently show thin lines across some scaled backgrounds.
 Requirements: Windows 10/11 x64, a GPU with Direct3D 12 or Vulkan.
 
 Source code, license (GPLv3) and how to report problems: see the project's GitHub page.
-Not affiliated with or endorsed by Nintendo, Bandai Namco or the rights holders of Neon Genesis Evangelion.
+Not affiliated with or endorsed by the game's publisher, the console maker or the rights holders of Neon Genesis Evangelion.

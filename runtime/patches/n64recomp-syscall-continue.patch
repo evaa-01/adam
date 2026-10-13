@@ -1,0 +1,31 @@
+diff --git a/include/recompiler/context.h b/include/recompiler/context.h
+index e7b4431..c14cb4a 100644
+--- a/include/recompiler/context.h
++++ b/include/recompiler/context.h
+@@ -235,6 +235,9 @@ namespace N64Recomp {
+         bool skip_validating_reference_symbols = true;
+         // Whether all function calls (excluding reference symbols) should go through lookup.
+         bool use_lookup_for_all_function_calls = false;
++        // adam patch: continue after a syscall's handler instead of returning from the function (for hooks that
++        // replace an instruction with a syscall and redo it in the handler).
++        bool syscalls_continue = false;
+ 
+         //// Only used by the CLI, TODO move this to a struct in the internal headers.
+         // A mapping of function name to index in the functions vector
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+index c228433..ad56b16 100644
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -564,8 +564,10 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+         print_indent();
+         generator.emit_syscall(instr_vram);
+         // syscalls don't link, so treat it like a tail call
+-        print_indent();
+-        generator.emit_return(context, func_index);
++        if (!context.syscalls_continue) {
++            print_indent();
++            generator.emit_return(context, func_index);
++        }
+         break;
+     case InstrId::cpu_break:
+         print_indent();

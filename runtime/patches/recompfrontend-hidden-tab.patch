@@ -1,0 +1,38 @@
+diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
+index b057f46..f0456c1 100644
+--- a/recompui/src/elements/ui_modal.cpp
++++ b/recompui/src/elements/ui_modal.cpp
+@@ -334,6 +334,13 @@ TabbedModal::TabbedModal(
+ void TabbedModal::process_event(const Event &e) {
+     switch (e.type) {
+         case EventType::Update: {
++            // adam: never stay on a hidden tab (the modal starts on tab 0; adam hides the stock General tab).
++            if (tabs != nullptr && current_tab_index >= 0) {
++                int visible = tabs->get_next_tab_in_direction(current_tab_index - 1, 1);
++                if (visible >= 0 && visible != current_tab_index) {
++                    set_selected_tab(visible);
++                }
++            }
+             if (previous_tab_index != current_tab_index) {
+                 body->clear_children();
+                 if (current_tab_index >= 0 && current_tab_index < tab_contexts.size()) {
+@@ -385,7 +392,9 @@ void TabbedModal::on_tab_change(int tab_index) {
+ 
+ void TabbedModal::set_selected_tab(int tab_index) {
+     if (tabs != nullptr) {
+-        tabs->set_active_tab(tab_index, true);
++        // adam: a hidden tab selects the next visible one instead (e.g. the launcher's Settings asks for "general").
++        int visible = tabs->get_next_tab_in_direction(tab_index - 1, 1);
++        tabs->set_active_tab(visible >= 0 ? visible : tab_index, true);
+     }
+ }
+ 
+@@ -393,7 +402,7 @@ void TabbedModal::set_selected_tab(const std::string &id) {
+     if (tabs != nullptr) {
+         for (int i = 0; i < tab_contexts.size(); i++) {
+             if (tab_contexts[i].id == id) {
+-                tabs->set_active_tab(i, true);
++                set_selected_tab(i);
+                 break;
+             }
+         }

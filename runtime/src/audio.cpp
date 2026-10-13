@@ -18,6 +18,8 @@
 #include "ultramodern/ultramodern.hpp"
 #include "recompui/config.h"
 
+namespace adam::rewind { bool active(); } // rewind.cpp
+
 namespace {
     SDL_AudioCVT audio_convert;
     SDL_AudioDeviceID audio_device = 0;
@@ -65,7 +67,8 @@ namespace {
             return;
         }
         // Fast-forward (main.cpp): the game makes audio faster than it can play; mute instead of falling behind.
-        if (ultramodern::get_speed_multiplier() > 1) {
+        // Rewind (rewind.cpp): the rewound frames' sound would be noise; mute too.
+        if (ultramodern::get_speed_multiplier() > 1 || adam::rewind::active()) {
             return;
         }
 

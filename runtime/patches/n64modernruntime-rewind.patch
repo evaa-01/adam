@@ -1,0 +1,69 @@
+diff --git a/ultramodern/include/ultramodern/os_objects.hpp b/ultramodern/include/ultramodern/os_objects.hpp
+new file mode 100644
+index 0000000..20d5c2f
+--- /dev/null
++++ b/ultramodern/include/ultramodern/os_objects.hpp
+@@ -0,0 +1,13 @@
++#pragma once
++
++#include <cstdint>
++
++// adam patch (rewind): reports the OS objects the game creates in RDRAM, so a RAM rewind can leave them alone (their
++// state belongs to the host threads and queues, which aren't rewound).
++namespace ultramodern {
++    enum class OsObjectKind { Thread, MesgQueue, MesgBuffer };
++    // addr/size: the object in RDRAM (KSEG0 address). For a thread, stack_top is the sp the game passed, else 0.
++    using os_object_callback_t = void (*)(OsObjectKind kind, uint32_t addr, uint32_t size, uint32_t stack_top);
++    void set_os_object_callback(os_object_callback_t callback);
++    void report_os_object(OsObjectKind kind, uint32_t addr, uint32_t size, uint32_t stack_top);
++}
+diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index 9944a02..09c7b8e 100644
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/os_objects.hpp"
+ 
+ struct QueuedMessage {
+     PTR(OSMesgQueue) mq;
+@@ -75,6 +76,8 @@ extern "C" void osCreateMesgQueue(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSMesg) ms
+     mq->msg = msg;
+     mq->validCount = 0;
+     mq->first = 0;
++    ultramodern::report_os_object(ultramodern::OsObjectKind::MesgQueue, (uint32_t)mq_, sizeof(OSMesgQueue), 0);
++    ultramodern::report_os_object(ultramodern::OsObjectKind::MesgBuffer, (uint32_t)msg, (uint32_t)count * 4, 0);
+ }
+ 
+ s32 MQ_GET_COUNT(OSMesgQueue *mq) {
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 6e3ed18..c1ee6f3 100644
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -8,6 +8,15 @@
+ #include "blockingconcurrentqueue.h"
+ 
+ #include "ultramodern/threads.hpp"
++#include "ultramodern/os_objects.hpp"
++
++static ultramodern::os_object_callback_t os_object_callback = nullptr;
++void ultramodern::set_os_object_callback(os_object_callback_t callback) { os_object_callback = callback; }
++void ultramodern::report_os_object(OsObjectKind kind, uint32_t addr, uint32_t size, uint32_t stack_top) {
++    if (os_object_callback != nullptr) {
++        os_object_callback(kind, addr, size, stack_top);
++    }
++}
+ 
+ // Native APIs only used to set thread names for easier debugging
+ #ifdef _WIN32
+@@ -250,6 +259,8 @@ extern "C" void osStartThread(RDRAM_ARG PTR(OSThread) t_) {
+ 
+ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(thread_func_t) entrypoint, PTR(void) arg, PTR(void) sp, OSPri pri) {
+     debug_printf("[os] Create Thread %d\n", id);
++    // The game's OSThread is libultra's full 0x1B0-byte struct; ultramodern only uses its start.
++    ultramodern::report_os_object(ultramodern::OsObjectKind::Thread, (uint32_t)t_, 0x1B0, (uint32_t)sp);
+     OSThread *t = TO_PTR(OSThread, t_);
+     
+     t->next = NULLPTR;

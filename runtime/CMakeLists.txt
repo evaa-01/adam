@@ -110,8 +110,18 @@ endif()
 set(RSP_DIR "${CMAKE_SOURCE_DIR}/../rsp")
 
 # Main executable
-add_executable(adam src/main.cpp src/input.cpp src/audio.cpp src/config.cpp src/rsp_interp.cpp src/launcher_art.cpp src/subtitles.cpp
+add_executable(adam src/main.cpp src/input.cpp src/audio.cpp src/config.cpp src/rsp_interp.cpp src/launcher_art.cpp src/bezels.cpp src/subtitles.cpp src/rewind.cpp
     src/embedded_files_unpack.cpp ${CMAKE_BINARY_DIR}/embedded_files.cpp)
+
+# Version shown in the launcher = package\VERSION (the release number, also used by scripts\package_live.ps1).
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/package/VERSION")
+file(STRINGS "${CMAKE_SOURCE_DIR}/package/VERSION" ADAM_VERSION LIMIT_COUNT 1)
+string(STRIP "${ADAM_VERSION}" ADAM_VERSION)
+if (NOT ADAM_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+    message(FATAL_ERROR "package/VERSION must be like 1.2.3, is '${ADAM_VERSION}'")
+endif()
+target_compile_definitions(adam PRIVATE ADAM_VERSION_MAJOR=${CMAKE_MATCH_1} ADAM_VERSION_MINOR=${CMAKE_MATCH_2}
+    ADAM_VERSION_PATCH=${CMAKE_MATCH_3})
 
 # Files built into the exe (src\embedded_files.h): the menus' assets\, SDL's controller database and, in the live shell,
 # live\symbols.toml + live\config.toml. embedded_files.cpp pulls each one in with clang's #embed; a trailing 0 keeps

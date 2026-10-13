@@ -25,11 +25,13 @@ $liveFlag = if ($Live) { "-DADAM_LIVE=ON" } else { "-DADAM_LIVE=OFF" }
 if ($Clean -and (Test-Path $build)) { Remove-Item -Recurse -Force $build }
 
 # Our changes to the checkouts outside this repo live in runtime\patches\: rt64-*.patch for RT64, recompfrontend-*.patch
-# for RecompFrontend, n64modernruntime-*.patch for N64ModernRuntime. All are checked out next to the project folder
-# (..\rt64, ..\RecompFrontend, ..\N64ModernRuntime), like CMakeLists.txt expects. Apply each patch that isn't applied yet; stop if one doesn't fit (checkout at another commit?).
+# for RecompFrontend, n64modernruntime-*.patch for N64ModernRuntime, n64recomp-*.patch for its N64Recomp submodule (the
+# live build's recompiler). All are checked out next to the project folder (..\rt64, ..\RecompFrontend,
+# ..\N64ModernRuntime), like CMakeLists.txt expects. Apply each patch that isn't applied yet; stop if one doesn't fit (checkout at another commit?).
 # (git's stderr output would be a terminating error under "Stop", and the "already applied?" check fails by design.)
 $deps = Split-Path (Split-Path $src -Parent) -Parent
-$patchTargets = @{ "rt64" = (Join-Path $deps "rt64"); "recompfrontend" = (Join-Path $deps "RecompFrontend"); "n64modernruntime" = (Join-Path $deps "N64ModernRuntime") }
+$patchTargets = @{ "rt64" = (Join-Path $deps "rt64"); "recompfrontend" = (Join-Path $deps "RecompFrontend"); "n64modernruntime" = (Join-Path $deps "N64ModernRuntime");
+    "n64recomp" = (Join-Path $deps "N64ModernRuntime\N64Recomp") }
 foreach ($prefix in $patchTargets.Keys) {
     $repo = $patchTargets[$prefix]
     foreach ($patch in Get-ChildItem (Join-Path $src "patches\$prefix-*.patch")) {

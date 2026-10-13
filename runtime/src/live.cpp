@@ -12,8 +12,9 @@
 //   at startup with placeholder pointers (structure from symbols.toml, compiled against a blank ROM), and on_init
 //   compiles the real code, fills the pointers in and reloads the sections.
 // - scripts\extra_hooks.txt inserts C code into the generated C; live code has no C. Each hook's instruction is
-//   replaced by a `syscall` and done in syscall_handler below (the replaced instruction is redone there); the
-//   audio pacing hook becomes a replacement for osAiGetStatus (its only caller is the audio thread).
+//   replaced by a `syscall` and done in syscall_handler below (the replaced instruction is redone there; the code
+//   then continues: context.syscalls_continue, runtime\patches\n64recomp-syscall-continue.patch - upstream treats a
+//   syscall as a tail call, which made every hooked function return right after its hook); the audio pacing hook becomes a replacement for osAiGetStatus (its only caller is the audio thread).
 
 #include <atomic>
 #include <chrono>
@@ -45,6 +46,8 @@ extern "C" gpr cop0_status_read(recomp_context* ctx);
 extern "C" void switch_error(const char* func, uint32_t vram, uint32_t jtbl);
 extern "C" uint32_t adam_ai_status(void); // audio.cpp
 extern "C" void adam_on_sound(uint8_t* rdram, recomp_context* ctx); // subtitles.cpp
+extern "C" void adam_rewind_frame(uint8_t* rdram); // rewind.cpp
+extern "C" void adam_rewind_reset(void);
 uint32_t adam_frame_count(); // main.cpp
 
 namespace {
@@ -79,6 +82,7 @@ namespace {
         { 0x800A8B04, 0x1040FFFF }, // main thread end: beqz $v0, .
         { 0x800AB7A0, 0x8FBF002C }, // overlay loader epilogue: lw $ra, 0x2C($sp)
         { 0x8009B830, 0x3C028017 }, // sound/voice playback func_8009B830 entry: lui $v0, 0x8017
+        { 0x800A8B34, 0x27BDFFE8 }, // frame callback func_800A8B34 entry: addiu $sp, $sp, -0x18
     };
 
     void syscall_handler(uint8_t* rdram, recomp_context* ctx, int32_t instruction_vram) {
@@ -99,6 +103,7 @@ namespace {
                 }
                 break;
             case 0x800AB7A0: // overlay loaded into the shared slot: $s6 = ROM, $s4 = VRAM, $s2 = size
+                adam_rewind_reset(); // the code mapping can't be rewound
                 unload_overlays((int32_t)OVT_SLOT_VRAM, 0x5F1D0);
                 load_overlays((uint32_t)ctx->r22, (int32_t)ctx->r20, (uint32_t)ctx->r18);
                 printf("[overlay] loaded ROM 0x%06X size 0x%05X at 0x%08X\n", (unsigned)ctx->r22, (unsigned)ctx->r18, (unsigned)ctx->r20);
@@ -107,6 +112,10 @@ namespace {
             case 0x8009B830: // a sound or voice clip starts (subtitles.cpp)
                 adam_on_sound(rdram, ctx);
                 ctx->r2 = (gpr)(int32_t)0x80170000;
+                break;
+            case 0x800A8B34: // frame callback starts: rewind records or rewinds RDRAM (rewind.cpp)
+                adam_rewind_frame(rdram);
+                ctx->r29 = (gpr)(int32_t)((int32_t)ctx->r29 - 0x18);
                 break;
             default:
                 fprintf(stderr, "[live] unexpected syscall at 0x%08X\n", (unsigned)instruction_vram);
@@ -216,6 +225,7 @@ namespace {
             }
         }
         context.use_lookup_for_all_function_calls = true;
+        context.syscalls_continue = true;
         return true;
     }
 
@@ -370,6 +380,23 @@ namespace {
 }
 
 namespace adam::live {
+    // For crash reports: the game function whose compiled code contains addr (the nearest function start at or below
+    // it). Returns false if addr isn't in the compiled code.
+    bool find_function(const void* addr, uint32_t* vram, uint32_t* offset) {
+        uintptr_t a = (uintptr_t)addr, best = 0;
+        for (size_t s = 0; s < section_funcs.size(); s++) {
+            for (const FuncEntry& e : section_funcs[s]) {
+                uintptr_t f = (uintptr_t)e.func;
+                if (f <= a && f > best && section_func_indices[s][&e - section_funcs[s].data()] != (size_t)-1) {
+                    best = f;
+                    *vram = section_table[s].ram_addr + e.offset;
+                }
+            }
+        }
+        *offset = (uint32_t)(a - best);
+        return best != 0 && a - best < 0x100000;
+    }
+
     // At startup: tables from symbols.toml (blank ROM, so the structure is right but nothing is compiled yet).
     bool register_tables() {
         N64Recomp::Context context;

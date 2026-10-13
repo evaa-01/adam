@@ -1,10 +1,11 @@
-// Launcher background from the player's stored ROM (nothing from the ROM is in the exe): the game's 288x224 image
-// "D02END20" with its palette, found through the game's own asset tables (see scripts\export_named_images.py):
+// The game's named full-screen images from the player's stored ROM (nothing from the ROM is in the exe), for the launcher
+// background and the bezels (bezels.cpp), each with its palette, found through the game's own asset tables (see
+// scripts\export_named_images.py):
 //   images:   base ROM 0x1D9000, table 0x800D6AD0 (12-byte entries {offset, packed size, unpacked size}), Yay0 files
 //             that unpack to a 16-byte header (u16 width, u16 height, 4 bytes, 8-char name) + CI8 pixels
 //   palettes: base ROM 0x60CB80, table 0x800DD820, 256 raw RGBA16 colours
 //   pairs:    0x800E2080, {u16 image, u16 palette} per image number
-// Any mismatch (other ROM, damaged file) returns false and the launcher keeps its default look.
+// Any mismatch (other ROM, damaged file) leaves that image empty; the callers then keep their default look.
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -21,8 +22,6 @@ namespace {
     constexpr uint32_t IMAGE_ROM = 0x1D9000, IMAGE_TABLE = 0x800D6AD0;
     constexpr uint32_t PALETTE_ROM = 0x60CB80, PALETTE_TABLE = 0x800DD820;
     constexpr uint32_t PAIRS = 0x800E2080;
-    constexpr uint32_t BACKGROUND_IMAGE = 434; // D02END20
-    constexpr char BACKGROUND_NAME[] = "D02END20";
 
     struct Rom {
         std::vector<uint8_t> bytes;
@@ -104,36 +103,54 @@ namespace {
     }
 }
 
-bool adam::launcher_art::load_background(std::vector<char>& rgba, uint32_t& width, uint32_t& height) {
-    std::ifstream file{ recomp::get_config_path() / "adam.z64", std::ios::binary };
-    if (!file) {
-        return false;
-    }
-    Rom rom{ std::vector<uint8_t>{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() } };
-
-    size_t pair = boot_rom(PAIRS) + BACKGROUND_IMAGE * 4;
-    if (!rom.has(pair, 4) || rom.u16(pair) != BACKGROUND_IMAGE) {
-        return false;
-    }
-    std::vector<uint8_t> image = load_asset(rom, IMAGE_ROM, IMAGE_TABLE, BACKGROUND_IMAGE);
-    std::vector<uint8_t> palette = load_asset(rom, PALETTE_ROM, PALETTE_TABLE, rom.u16(pair + 2));
-    if (image.size() < 16 || palette.size() < 512 || std::memcmp(&image[8], BACKGROUND_NAME, 8) != 0) {
-        return false;
-    }
-    width = (uint32_t(image[0]) << 8) | image[1];
-    height = (uint32_t(image[2]) << 8) | image[3];
-    if (image.size() != 16 + size_t(width) * height) {
-        return false;
+namespace {
+    std::vector<uint8_t> read_stored_rom() {
+        std::ifstream file{ recomp::get_config_path() / "adam.z64", std::ios::binary };
+        if (!file) {
+            return {};
+        }
+        return { std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
     }
 
-    rgba.resize(size_t(width) * height * 4);
-    for (size_t i = 0; i < size_t(width) * height; i++) {
-        const uint8_t* c = &palette[size_t(image[16 + i]) * 2];
-        uint16_t colour = uint16_t((c[0] << 8) | c[1]); // RGBA 5551
-        rgba[i * 4 + 0] = char(((colour >> 11) & 31) * 255 / 31);
-        rgba[i * 4 + 1] = char(((colour >> 6) & 31) * 255 / 31);
-        rgba[i * 4 + 2] = char(((colour >> 1) & 31) * 255 / 31);
-        rgba[i * 4 + 3] = char(255);
+    // One image + its palette -> RGBA8. False on any mismatch.
+    bool decode(const Rom& rom, uint32_t index, const std::string& name, std::vector<char>& rgba, uint32_t& width, uint32_t& height) {
+        size_t pair = boot_rom(PAIRS) + size_t(index) * 4;
+        if (!rom.has(pair, 4) || rom.u16(pair) != index || name.size() != 8) {
+            return false;
+        }
+        std::vector<uint8_t> image = load_asset(rom, IMAGE_ROM, IMAGE_TABLE, index);
+        std::vector<uint8_t> palette = load_asset(rom, PALETTE_ROM, PALETTE_TABLE, rom.u16(pair + 2));
+        if (image.size() < 16 || palette.size() < 512 || std::memcmp(&image[8], name.data(), 8) != 0) {
+            return false;
+        }
+        width = (uint32_t(image[0]) << 8) | image[1];
+        height = (uint32_t(image[2]) << 8) | image[3];
+        if (image.size() != 16 + size_t(width) * height) {
+            return false;
+        }
+
+        rgba.resize(size_t(width) * height * 4);
+        for (size_t i = 0; i < size_t(width) * height; i++) {
+            const uint8_t* c = &palette[size_t(image[16 + i]) * 2];
+            uint16_t colour = uint16_t((c[0] << 8) | c[1]); // RGBA 5551
+            rgba[i * 4 + 0] = char(((colour >> 11) & 31) * 255 / 31);
+            rgba[i * 4 + 1] = char(((colour >> 6) & 31) * 255 / 31);
+            rgba[i * 4 + 2] = char(((colour >> 1) & 31) * 255 / 31);
+            rgba[i * 4 + 3] = char(255);
+        }
+        return true;
     }
-    return true;
+}
+
+std::vector<adam::launcher_art::Picture> adam::launcher_art::load_images(const std::vector<std::pair<uint32_t, std::string>>& wanted) {
+    Rom rom{ read_stored_rom() };
+    std::vector<Picture> out;
+    for (const auto& [index, name] : wanted) {
+        Picture picture{ .index = index, .name = name };
+        if (rom.bytes.empty() || !decode(rom, index, name, picture.rgba, picture.width, picture.height)) {
+            picture.rgba.clear();
+        }
+        out.push_back(std::move(picture));
+    }
+    return out;
 }
